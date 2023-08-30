@@ -13,7 +13,7 @@ class WebSocketManager implements MessageComponentInterface
     function onOpen(ConnectionInterface $conn)
     {
         $this->connections[] = $conn;
-        return $this->sendMessageToClient($conn, 'Bienvenido a la sala del chat');
+        return $this->sendMessageToClient($conn, 'Bienvenido a la sala del chat.');
     }
 
     function onMessage(ConnectionInterface $from, $msg)
