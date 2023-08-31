@@ -3,17 +3,29 @@
 namespace Web\Sockets;
 
 use Exception;
+use Illuminate\Support\Collection;
 use Ratchet\ConnectionInterface;
 use Ratchet\MessageComponentInterface;
 
 class WebSocketManager implements MessageComponentInterface
 {
     protected $connections = [];
+    protected $currentClientId = 0;
 
-    function onOpen(ConnectionInterface $conn)
+    function onOpen(ConnectionInterface $conn, int $userId = null)
     {
-        $this->connections[] = $conn;
-        return $this->sendMessageToClient($conn, 'Bienvenido a la sala del chat.');
+        if ($userId) {
+            $info['user_id'] = $userId;
+            $info['data'] = $conn;
+            array_push($this->connections, $info);
+        } else {
+            $this->currentClientId++;
+            $clientId = $this->currentClientId;
+            $info['user_id'] = $clientId;
+            $info['data'] = $conn;
+            array_push($this->connections, $info);
+        }
+        return $this->sendMessageToClient($conn, 'Bienvenido a la sala del chat usuario # '. json_encode($info));
     }
 
     function onMessage(ConnectionInterface $from, $msg)
@@ -22,7 +34,7 @@ class WebSocketManager implements MessageComponentInterface
         if (isset($message['action'])) {
             switch ($message['action']) {
                 case 'chat':
-                    return $this->broadcastMessage($from, $message['message']);
+                    return $this->broadcastMessage($from, $message, $message['to']);
                     break;
                 default:
                     return 'error';
@@ -57,17 +69,13 @@ class WebSocketManager implements MessageComponentInterface
         }
     }
 
-    protected function broadcastMessage(ConnectionInterface $from, mixed $msg)
+    protected function broadcastMessage(ConnectionInterface $from, mixed $msg, int $userId = null)
     {
-        $data = json_encode([
-            'action' => 'chat',
-            'message' => $msg
-        ]);
-        foreach ($this->connections as $connection) {
-            if ($connection !== $from) {
-                return $from->send($data);
-            }
-            return $data;
+        $users = collect($this->connections);
+        if (is_array($msg)) {
+            return $this->broadcastMessageArray($msg, $users, $userId);
+        } else {
+            return $this->broadcastMessageSimple($from, $msg, $users);
         }
     }
 
@@ -75,5 +83,35 @@ class WebSocketManager implements MessageComponentInterface
     {
         unset($this->connections[0]);
         $conn->close();
+    }
+
+    protected function broadcastMessageArray(array $msg, Collection $users, int $userId)
+    {
+        $data = json_encode([
+            'action' => $msg['action'],
+            'message' => $msg['message'],
+            'to' => $msg['to'],
+            'from' => $msg['from']
+        ]);
+        return $users->map(function ($user) use($userId, $data){
+            if (($userId) && ($userId == $user['user_id'])) {
+                $user['data']->send($data);
+            }
+            return $data;
+        });
+    }
+
+    protected function broadcastMessageSimple(ConnectionInterface $from, string $msg, Collection $users)
+    {
+        $data = json_encode([
+            'action' => 'info',
+            'message' => $msg
+        ]);
+        return $users->map(function ($user) use($from, $data){
+            if ($user['data'] !== $from) {
+                $user['data']->send($data);
+            }
+            return $data;
+        });
     }
 }
